@@ -1,8 +1,9 @@
 # C#
 
-`using Argosy.Sigil;` (.NET 8, P/Invoke over the shared library). Build the library with
+`using Argosy.Sigil;` (.NET Framework 4.6.2, P/Invoke over the shared library). Build the library with
 `cmake -DSIGIL_BUILD_SHARED=ON` and point `SIGIL_LIB_DIR` at the folder holding `libsigil.so`,
-`libsigil.dylib` or `sigil.dll`; without it the assembly's own folder and the default probing are tried.
+`libsigil.dylib` or `sigil.dll` / `libsigil.dll`; without it the assembly's own folder (and its `x86`/`x64` folder)
+and the default probing are tried.
 `make test` in [`bindings/csharp/`](../../bindings/csharp/) does both. Failures throw a `SigilException`
 subclass per C code (`SigilNotFoundException`, `SigilNeedsKeyException`, `SigilIOException`, ...), each with
 `Code`, and `Problem` and `Profiles` where the call names them.

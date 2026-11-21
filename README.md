@@ -81,7 +81,7 @@ containers sigil reads: [identification](docs/identification.md),
 - Go (cgo): [`bindings/go/`](bindings/go/). Guide: [Go](docs/quickstart-guides/go.md).
 - Python (cffi): [`bindings/python/`](bindings/python/). Guide:
   [Python](docs/quickstart-guides/python.md).
-- C# (.NET 8, P/Invoke): [`bindings/csharp/`](bindings/csharp/). Guide:
+- C# (.NET Framework 4.6.2, P/Invoke): [`bindings/csharp/`](bindings/csharp/). Guide:
   [C#](docs/quickstart-guides/csharp.md).
 
 Every binding exposes the same operations, options and fields. Each guide

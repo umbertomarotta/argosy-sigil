@@ -1,7 +1,8 @@
 <Project Sdk="Microsoft.NET.Sdk">
 
   <PropertyGroup>
-    <TargetFramework>net8.0</TargetFramework>
+    <!-- .NET Framework 4.6.2: Playnite plugins run on it. Compat.cs supplies the language-support types it lacks. -->
+    <TargetFramework>net462</TargetFramework>
     <AssemblyName>Argosy.Sigil</AssemblyName>
     <RootNamespace>Argosy.Sigil</RootNamespace>
     <PackageId>Argosy.Sigil</PackageId>
@@ -21,6 +22,8 @@
 
   <ItemGroup>
     <InternalsVisibleTo Include="Sigil.Tests" />
+    <!-- Lets the library build on machines without the .NET Framework targeting pack (Linux, macOS, CI). -->
+    <PackageReference Include="Microsoft.NETFramework.ReferenceAssemblies" Version="1.0.3" PrivateAssets="all" />
   </ItemGroup>
 
 </Project>

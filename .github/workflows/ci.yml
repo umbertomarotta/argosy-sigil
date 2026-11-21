@@ -120,24 +120,37 @@ jobs:
         run: gradle -p tests/kotlin :sigil:testDebugUnitTest
 
   csharp:
-    name: csharp
-    runs-on: ubuntu-latest
+    # The binding targets net462, which runs on .NET Framework: Windows, against a MinGW build of the library.
+    name: csharp (net462, MinGW)
+    runs-on: windows-latest
     steps:
       - uses: actions/checkout@v4
-
-      - uses: actions/setup-dotnet@v4
         with:
-          dotnet-version: "8.0.x"
+          submodules: recursive
+
+      - uses: msys2/setup-msys2@v2
+        id: msys2
+        with:
+          msystem: UCRT64
+          path-type: inherit
+          install: >-
+            mingw-w64-ucrt-x86_64-gcc
+            mingw-w64-ucrt-x86_64-cmake
+            mingw-w64-ucrt-x86_64-ninja
 
       - name: Build the shared library
+        shell: msys2 {0}
         run: |
-          cmake -B build-shared -S . -DCMAKE_BUILD_TYPE=Release -DSIGIL_BUILD_TESTS=OFF -DSIGIL_BUILD_SHARED=ON
+          cmake -B build-shared -S . -G Ninja -DCMAKE_BUILD_TYPE=Release -DSIGIL_BUILD_TESTS=OFF -DSIGIL_BUILD_SHARED=ON
           cmake --build build-shared
 
       - name: C# tests
+        shell: pwsh
         env:
-          SIGIL_LIB_DIR: ${{ github.workspace }}/build-shared
-        run: dotnet test bindings/csharp/Sigil.Tests
+          SIGIL_LIB_DIR: ${{ github.workspace }}\build-shared
+        run: |
+          $env:PATH = "${{ steps.msys2.outputs.msys2-location }}\ucrt64\bin;$env:PATH"
+          dotnet test bindings/csharp/Sigil.Tests
 
   contract:
     name: cross-language contract

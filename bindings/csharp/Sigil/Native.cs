@@ -4,6 +4,7 @@ using System;
 using System.IO;
 using System.Reflection;
 using System.Runtime.InteropServices;
+using System.Text;
 
 #pragma warning disable CS0649 // Fields the native side fills.
 #pragma warning disable IDE1006 // The structs keep include/sigil.h's names so each field can be checked against it.
@@ -139,7 +140,24 @@ internal unsafe struct NativeLayoutInfo
 {
     public fixed byte id[64];
     public fixed byte platform[16];
-    public fixed byte options[5760]; // NativeLayoutOption [SIGIL_LAYOUT_OPTIONS]
+    // sigil_layout_option options[SIGIL_LAYOUT_OPTIONS] (16): sixteen fields rather than a byte buffer, because an
+    // option is 360 bytes on x64 but 356 on x86 (size_t), and a fixed buffer's size must be a constant.
+    public NativeLayoutOption options0;
+    public NativeLayoutOption options1;
+    public NativeLayoutOption options2;
+    public NativeLayoutOption options3;
+    public NativeLayoutOption options4;
+    public NativeLayoutOption options5;
+    public NativeLayoutOption options6;
+    public NativeLayoutOption options7;
+    public NativeLayoutOption options8;
+    public NativeLayoutOption options9;
+    public NativeLayoutOption options10;
+    public NativeLayoutOption options11;
+    public NativeLayoutOption options12;
+    public NativeLayoutOption options13;
+    public NativeLayoutOption options14;
+    public NativeLayoutOption options15;
     public nuint option_count;
     public fixed byte region_option[64];
     public int profiles;
@@ -289,24 +307,42 @@ internal static unsafe class Native
     internal const int LAYOUT_OPTION_VALUES = 8;
     internal const int LAYOUT_OPTION_VALUE_LEN = 32;
 
-    // The native library is found, in order, in the folder SIGIL_LIB_DIR names, beside this assembly, and by the
-    // runtime's default probing (the NuGet runtimes/<rid>/native folder, the application folder, the system paths).
+    // The native library is found, in order, in the folder SIGIL_LIB_DIR names, beside this assembly (then its x86/x64
+    // subfolder), and by the default probing. net462 has no NativeLibrary/DllImportResolver, so on Windows the DLL is
+    // loaded by full path before the first call; a module already loaded as "sigil.dll" then satisfies DllImport("sigil").
+    // A module's name is its file name, so a MinGW build (libsigil.dll) is first copied to a temporary sigil.dll.
+    // Elsewhere (Mono on Linux/macOS, as in the tests) the default probing finds libsigil.so/.dylib.
     static Native()
     {
-        NativeLibrary.SetDllImportResolver(typeof(Native).Assembly, Resolve);
+        EnsureLoaded();
     }
 
-    private static IntPtr Resolve(string name, Assembly assembly, DllImportSearchPath? searchPath)
+    [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern IntPtr LoadLibraryExW(string path, IntPtr file, uint flags);
+
+    [DllImport("kernel32", CharSet = CharSet.Unicode, SetLastError = true)]
+    private static extern bool SetDllDirectoryW(string? path);
+
+    private const uint LOAD_WITH_ALTERED_SEARCH_PATH = 0x8;
+
+    private static bool IsWindows => Environment.OSVersion.Platform == PlatformID.Win32NT;
+
+    private static void EnsureLoaded()
     {
-        if (name != Lib)
+        if (!IsWindows)
         {
-            return IntPtr.Zero;
+            return;
         }
+        string arch = IntPtr.Size == 8 ? "x64" : "x86";
+        string assemblyFolder = Path.GetDirectoryName(typeof(Native).Assembly.Location) ?? "";
         string[] folders =
         {
             Environment.GetEnvironmentVariable("SIGIL_LIB_DIR") ?? "",
-            Path.GetDirectoryName(assembly.Location) ?? "",
+            assemblyFolder,
+            Path.Combine(assemblyFolder, arch),
+            Path.Combine(assemblyFolder, "native", arch),
         };
+        string failures = "";
         foreach (string folder in folders)
         {
             if (folder.Length == 0)
@@ -314,101 +350,200 @@ internal static unsafe class Native
                 continue;
             }
             // MSVC builds sigil.dll; MinGW prefixes it, libsigil.dll.
-            string[] files = OperatingSystem.IsWindows() ? new[] { "sigil.dll", "libsigil.dll" }
-                : OperatingSystem.IsMacOS() ? new[] { "libsigil.dylib" }
-                : new[] { "libsigil.so" };
-            foreach (string file in files)
+            foreach (string file in new[] { "sigil.dll", "libsigil.dll" })
             {
-                if (NativeLibrary.TryLoad(Path.Combine(folder, file), out IntPtr handle))
+                string full = Path.Combine(folder, file);
+                if (!File.Exists(full))
                 {
-                    return handle;
+                    continue;
+                }
+                string toLoad = file == "sigil.dll" ? full : CopyAsSigilDll(full);
+                // The DLL's own dependencies (a MinGW runtime next to it) are looked for in its folder too.
+                SetDllDirectoryW(folder);
+                IntPtr handle = LoadLibraryExW(toLoad, IntPtr.Zero, LOAD_WITH_ALTERED_SEARCH_PATH);
+                int error = Marshal.GetLastWin32Error();
+                SetDllDirectoryW(null);
+                if (handle != IntPtr.Zero)
+                {
+                    return;
+                }
+                failures += "\n  " + full + ": Win32 error " + error + (error == 193 ? " (wrong bitness)" : "");
+            }
+        }
+        if (failures.Length > 0)
+        {
+            throw new DllNotFoundException("sigil was found but could not be loaded by this " + arch + " process:" + failures);
+        }
+    }
+
+    private static string CopyAsSigilDll(string source)
+    {
+        FileInfo info = new FileInfo(source);
+        string folder = Path.Combine(Path.GetTempPath(), "Argosy.Sigil",
+            info.Length.ToString("x") + "-" + info.LastWriteTimeUtc.Ticks.ToString("x"));
+        string target = Path.Combine(folder, "sigil.dll");
+        if (!File.Exists(target))
+        {
+            Directory.CreateDirectory(folder);
+            try
+            {
+                File.Copy(source, target, false);
+            }
+            catch (IOException)
+            {
+                // Another process is copying or has it loaded; use whatever is there.
+                if (!File.Exists(target))
+                {
+                    throw;
                 }
             }
         }
-        return IntPtr.Zero;
+        return target;
     }
 
-    [DllImport(Lib)]
-    internal static extern int sigil_extract_from_path([MarshalAs(UnmanagedType.LPUTF8Str)] string path, int hint,
-        NativeOptions* opts, NativeResult* @out);
+    private static byte[]? Utf8z(string? s)
+    {
+        if (s == null)
+        {
+            return null;
+        }
+        byte[] bytes = new byte[Encoding.UTF8.GetByteCount(s) + 1];
+        Encoding.UTF8.GetBytes(s, 0, s.Length, bytes, 0);
+        return bytes;
+    }
 
-    [DllImport(Lib)]
-    internal static extern int sigil_platform_from_slug([MarshalAs(UnmanagedType.LPUTF8Str)] string? slug);
+    // sigil.h declares plain C functions (cdecl). DllImport defaults to stdcall on 32-bit Windows, which would corrupt the
+    // stack on every call there; on x64 there is one convention and it makes no difference.
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int sigil_extract_from_path(byte* path, int hint, NativeOptions* opts, NativeResult* @out);
 
-    [DllImport(Lib)]
+    internal static int sigil_extract_from_path(string path, int hint, NativeOptions* opts, NativeResult* @out)
+    {
+        fixed (byte* p_path = Utf8z(path))
+        return sigil_extract_from_path(p_path, hint, opts, @out);
+    }
+
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int sigil_platform_from_slug(byte* slug);
+
+    internal static int sigil_platform_from_slug(string? slug)
+    {
+        fixed (byte* p_slug = Utf8z(slug))
+        return sigil_platform_from_slug(p_slug);
+    }
+
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern IntPtr sigil_platform_to_slug(int platform);
 
-    [DllImport(Lib)]
-    internal static extern IntPtr sigil_io_open_file([MarshalAs(UnmanagedType.LPUTF8Str)] string path);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern IntPtr sigil_io_open_file(byte* path);
 
-    [DllImport(Lib)]
+    internal static IntPtr sigil_io_open_file(string path)
+    {
+        fixed (byte* p_path = Utf8z(path))
+        return sigil_io_open_file(p_path);
+    }
+
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern void sigil_io_close(IntPtr io);
 
-    [DllImport(Lib)]
-    internal static extern int sigil_load_header_key_from_prod_keys([MarshalAs(UnmanagedType.LPUTF8Str)] string path,
-        byte* @out);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int sigil_load_header_key_from_prod_keys(byte* path, byte* @out);
 
-    [DllImport(Lib)]
+    internal static int sigil_load_header_key_from_prod_keys(string path, byte* @out)
+    {
+        fixed (byte* p_path = Utf8z(path))
+        return sigil_load_header_key_from_prod_keys(p_path, @out);
+    }
+
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int sigil_save_resolve(NativeSaveRequest* req, NativeSaveUnit** @out);
 
-    [DllImport(Lib)]
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern void sigil_save_unit_free(NativeSaveUnit* unit);
 
-    [DllImport(Lib)]
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int sigil_save_hash(NativeSaveUnit* unit, IntPtr open, IntPtr openCtx);
 
-    [DllImport(Lib)]
-    internal static extern nuint sigil_save_layout_subdirs([MarshalAs(UnmanagedType.LPUTF8Str)] string layout,
-        byte** @out, nuint cap);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern nuint sigil_save_layout_subdirs(byte* layout, byte** @out, nuint cap);
 
-    [DllImport(Lib)]
-    internal static extern int sigil_save_base([MarshalAs(UnmanagedType.LPUTF8Str)] string layout,
-        [MarshalAs(UnmanagedType.LPUTF8Str)] string path, byte* @base, nuint baseCap, byte* profile, nuint profileCap);
+    internal static nuint sigil_save_layout_subdirs(string layout, byte** @out, nuint cap)
+    {
+        fixed (byte* p_layout = Utf8z(layout))
+        return sigil_save_layout_subdirs(p_layout, @out, cap);
+    }
 
-    [DllImport(Lib)]
-    internal static extern IntPtr sigil_save_layout_top([MarshalAs(UnmanagedType.LPUTF8Str)] string layout);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int sigil_save_base(byte* layout, byte* path, byte* @base, nuint baseCap, byte* profile, nuint profileCap);
 
-    [DllImport(Lib)]
+    internal static int sigil_save_base(string layout, string path, byte* @base, nuint baseCap, byte* profile, nuint profileCap)
+    {
+        fixed (byte* p_layout = Utf8z(layout))
+        fixed (byte* p_path = Utf8z(path))
+        return sigil_save_base(p_layout, p_path, @base, baseCap, profile, profileCap);
+    }
+
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern IntPtr sigil_save_layout_top(byte* layout);
+
+    internal static IntPtr sigil_save_layout_top(string layout)
+    {
+        fixed (byte* p_layout = Utf8z(layout))
+        return sigil_save_layout_top(p_layout);
+    }
+
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int sigil_save_profiles(NativeSaveRequest* req, NativeSaveProfile** @out, nuint* count);
 
-    [DllImport(Lib)]
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern void sigil_save_profiles_free(NativeSaveProfile* profiles);
 
-    [DllImport(Lib)]
-    internal static extern int sigil_layouts([MarshalAs(UnmanagedType.LPUTF8Str)] string? platform,
-        NativeLayoutInfo** @out, nuint* count);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern int sigil_layouts(byte* platform, NativeLayoutInfo** @out, nuint* count);
 
-    [DllImport(Lib)]
+    internal static int sigil_layouts(string? platform, NativeLayoutInfo** @out, nuint* count)
+    {
+        fixed (byte* p_platform = Utf8z(platform))
+        return sigil_layouts(p_platform, @out, count);
+    }
+
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern void sigil_layouts_free(NativeLayoutInfo* layouts);
 
-    [DllImport(Lib)]
-    internal static extern IntPtr sigil_content_stem([MarshalAs(UnmanagedType.LPUTF8Str)] string contentPath, byte* @out,
-        nuint cap);
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
+    internal static extern IntPtr sigil_content_stem(byte* contentPath, byte* @out, nuint cap);
 
-    [DllImport(Lib)]
+    internal static IntPtr sigil_content_stem(string contentPath, byte* @out, nuint cap)
+    {
+        fixed (byte* p_contentPath = Utf8z(contentPath))
+        return sigil_content_stem(p_contentPath, @out, cap);
+    }
+
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int sigil_card_list(IntPtr io, NativeCardListing** @out);
 
-    [DllImport(Lib)]
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern void sigil_card_listing_free(NativeCardListing* listing);
 
-    [DllImport(Lib)]
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int sigil_card_repair(IntPtr io, NativeCardRepairReport** @out);
 
-    [DllImport(Lib)]
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern void sigil_card_repair_report_free(NativeCardRepairReport* report);
 
-    [DllImport(Lib)]
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int sigil_collect(NativeSyncRequest* req, NativeSyncResult** @out);
 
-    [DllImport(Lib)]
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern int sigil_restore(NativeSyncRequest* req, byte* unit, nuint unitLen, NativeSyncResult** @out);
 
-    [DllImport(Lib)]
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern void sigil_sync_result_free(NativeSyncResult* result);
 
-    [DllImport(Lib)]
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern IntPtr sigil_strerror(int code);
 
-    [DllImport(Lib)]
+    [DllImport(Lib, CallingConvention = CallingConvention.Cdecl)]
     internal static extern IntPtr sigil_version();
 }

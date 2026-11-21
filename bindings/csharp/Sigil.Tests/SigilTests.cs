@@ -197,7 +197,11 @@ public class SaveTests
         Assert.Equal("", unit.ContentHash);
 
         SigilSaveUnit hashed = Sigil.HashSaves(unit, dir.Path);
-        string md5 = Convert.ToHexString(MD5.HashData(Data)).ToLowerInvariant();
+        string md5;
+        using (MD5 hasher = MD5.Create())
+        {
+            md5 = BitConverter.ToString(hasher.ComputeHash(Data)).Replace("-", "").ToLowerInvariant();
+        }
         Assert.Equal(md5, hashed.ContentHash);
         Assert.Equal(md5, hashed.IdentityHash);
     }

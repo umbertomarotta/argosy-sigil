@@ -222,7 +222,7 @@ public static unsafe class Sigil
                 var options = new List<SigilLayoutOption>();
                 for (int j = 0; j < (int)info->option_count; j++)
                 {
-                    NativeLayoutOption* option = (NativeLayoutOption*)info->options + j;
+                    NativeLayoutOption* option = (&info->options0) + j;
                     var values = new List<string>();
                     for (int k = 0; k < (int)option->value_count; k++)
                     {

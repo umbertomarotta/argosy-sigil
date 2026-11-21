@@ -146,7 +146,9 @@ internal static unsafe class SaveRootIo
         while (remaining > 0)
         {
             int n = (int)Math.Min(remaining, 1u << 30);
-            file.Write(new ReadOnlySpan<byte>(data, n));
+            byte[] chunk = new byte[n];
+            Marshal.Copy((IntPtr)data, chunk, 0, n);
+            file.Write(chunk, 0, n);
             data += n;
             remaining -= (ulong)n;
         }
@@ -168,11 +170,15 @@ internal static unsafe class SaveRootIo
                 WriteAll(file, data, length);
                 file.Flush(true);
             }
-            if (!OperatingSystem.IsWindows() && File.Exists(path))
+            // net462: no File.Move(overwrite) and no Unix file modes (the plugin only runs on Windows).
+            if (File.Exists(path))
             {
-                File.SetUnixFileMode(temp, File.GetUnixFileMode(path));
+                File.Replace(temp, path, null);
             }
-            File.Move(temp, path, true);
+            else
+            {
+                File.Move(temp, path);
+            }
         }
         catch
         {

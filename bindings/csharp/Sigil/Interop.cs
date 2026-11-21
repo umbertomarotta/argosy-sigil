@@ -12,7 +12,20 @@ internal static unsafe class Interop
     /// <summary>The string behind a NUL-terminated UTF-8 pointer; "" for NULL.</summary>
     internal static string Text(IntPtr chars)
     {
-        return chars == IntPtr.Zero ? "" : Marshal.PtrToStringUTF8(chars) ?? "";
+        return chars == IntPtr.Zero ? "" : Utf8ToString(chars);
+    }
+
+    // net462: Marshal.PtrToStringUTF8 does not exist there.
+    private static string Utf8ToString(IntPtr chars)
+    {
+        int length = 0;
+        while (Marshal.ReadByte(chars, length) != 0)
+        {
+            length++;
+        }
+        byte[] bytes = new byte[length];
+        Marshal.Copy(chars, bytes, 0, length);
+        return Encoding.UTF8.GetString(bytes);
     }
 
     internal static string Text(byte* chars)
@@ -38,7 +51,12 @@ internal static unsafe class Interop
         {
             return null;
         }
-        return new ReadOnlySpan<byte>(data, checked((int)length)).ToArray();
+        byte[] copy = new byte[checked((int)length)];
+        if (copy.Length > 0)
+        {
+            Marshal.Copy((IntPtr)data, copy, 0, copy.Length);
+        }
+        return copy;
     }
 
     internal static SigilException Error(int code)
@@ -63,7 +81,13 @@ internal sealed unsafe class Allocs : IDisposable
     /// <summary>Zeroed memory; never NULL, even for a size of 0.</summary>
     internal void* Alloc(nuint size)
     {
-        void* p = NativeMemory.AllocZeroed(size == 0 ? 1 : size);
+        // net462: no NativeMemory; AllocHGlobal plus an explicit zero-fill does the same job.
+        int bytes = checked((int)(size == 0 ? 1 : size));
+        byte* p = (byte*)Marshal.AllocHGlobal(bytes);
+        for (int i = 0; i < bytes; i++)
+        {
+            p[i] = 0;
+        }
         _pointers.Add((IntPtr)p);
         return p;
     }
@@ -107,7 +131,7 @@ internal sealed unsafe class Allocs : IDisposable
     {
         foreach (IntPtr p in _pointers)
         {
-            NativeMemory.Free((void*)p);
+            Marshal.FreeHGlobal(p);
         }
         _pointers.Clear();
     }
