@@ -1,0 +1,26 @@
+<Project Sdk="Microsoft.NET.Sdk">
+
+  <PropertyGroup>
+    <TargetFramework>net8.0</TargetFramework>
+    <AssemblyName>Argosy.Sigil</AssemblyName>
+    <RootNamespace>Argosy.Sigil</RootNamespace>
+    <PackageId>Argosy.Sigil</PackageId>
+    <!-- The same number as project() in CMakeLists.txt; bindings/python/test_contract.py fails when they differ. -->
+    <Version>1.0.0</Version>
+    <Description>C# bindings for the sigil library: read a game's id from its ROM, find the saves an emulator keeps for it, and collect and restore them for RomM.</Description>
+    <PackageLicenseExpression>MPL-2.0</PackageLicenseExpression>
+    <PackageProjectUrl>https://github.com/rommapp/argosy-sigil</PackageProjectUrl>
+    <Nullable>enable</Nullable>
+    <ImplicitUsings>disable</ImplicitUsings>
+    <LangVersion>12.0</LangVersion>
+    <AllowUnsafeBlocks>true</AllowUnsafeBlocks>
+    <GenerateDocumentationFile>true</GenerateDocumentationFile>
+    <!-- Every public member carries its contract in docs/quickstart-guides/csharp.md. -->
+    <NoWarn>$(NoWarn);CS1591</NoWarn>
+  </PropertyGroup>
+
+  <ItemGroup>
+    <InternalsVisibleTo Include="Sigil.Tests" />
+  </ItemGroup>
+
+</Project>

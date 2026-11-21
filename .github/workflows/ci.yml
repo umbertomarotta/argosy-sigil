@@ -119,6 +119,26 @@ jobs:
       - name: JVM tests
         run: gradle -p tests/kotlin :sigil:testDebugUnitTest
 
+  csharp:
+    name: csharp
+    runs-on: ubuntu-latest
+    steps:
+      - uses: actions/checkout@v4
+
+      - uses: actions/setup-dotnet@v4
+        with:
+          dotnet-version: "8.0.x"
+
+      - name: Build the shared library
+        run: |
+          cmake -B build-shared -S . -DCMAKE_BUILD_TYPE=Release -DSIGIL_BUILD_TESTS=OFF -DSIGIL_BUILD_SHARED=ON
+          cmake --build build-shared
+
+      - name: C# tests
+        env:
+          SIGIL_LIB_DIR: ${{ github.workspace }}/build-shared
+        run: dotnet test bindings/csharp/Sigil.Tests
+
   contract:
     name: cross-language contract
     runs-on: ubuntu-latest

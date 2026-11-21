@@ -180,6 +180,13 @@ def test_python_package_version_is_the_library_version():
     assert pyproject.group(1) == cmake.group(1)
 
 
+def test_csharp_package_version_is_the_library_version():
+    cmake = re.search(r"project\(sigil VERSION (\S+)", (ROOT / "CMakeLists.txt").read_text())
+    csproj = re.search(r"<Version>([^<]+)</Version>", (ROOT / "bindings/csharp/Sigil/Sigil.csproj").read_text())
+    assert cmake and csproj
+    assert csproj.group(1) == cmake.group(1)
+
+
 def test_python_usage_map_covers_c_enum():
     c_names = {name for name, _ in _c_usage_enum()}
     py_map = dict(
